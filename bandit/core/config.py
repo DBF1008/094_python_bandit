@@ -114,6 +114,19 @@ class BanditConfig:
         """
         return self._config
 
+    @property
+    def config_format(self):
+        """Return the format of the config file.
+
+        :return: One of ``"yaml"``, ``"toml"``, or ``"default"`` when
+            no config file was supplied.
+        """
+        if self.config_file is None:
+            return "default"
+        if self.config_file.endswith(".toml"):
+            return "toml"
+        return "yaml"
+
     def _init_settings(self):
         """This function calls a set of other functions (one per setting)
 

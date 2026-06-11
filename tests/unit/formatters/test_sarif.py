@@ -12,6 +12,7 @@ from bandit.core import constants
 from bandit.core import issue
 from bandit.core import manager
 from bandit.core import metrics
+from bandit.core.suppression import SuppressedIssue
 from bandit.formatters import sarif
 
 
@@ -137,3 +138,90 @@ class SarifFormatterTests(testtools.TestCase):
                 self.tmp_fname,
                 physicalLocation["artifactLocation"]["uri"],
             )
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_result_rich_properties(self, get_issue_list):
+        """Each SARIF result includes rule_doc_url and config_source."""
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+        get_issue_list.return_value = [self.issue]
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            sarif.report(
+                self.manager,
+                tmp_file,
+                self.issue.severity,
+                self.issue.confidence,
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            result = data["runs"][0]["results"][0]
+            props = result["properties"]
+
+            self.assertIn("rule_doc_url", props)
+            self.assertIsInstance(props["rule_doc_url"], str)
+            self.assertTrue(props["rule_doc_url"].startswith("https://"))
+
+            self.assertIn("config_source", props)
+            self.assertIn("config_file", props["config_source"])
+            self.assertIn("config_format", props["config_source"])
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_run_properties_config_and_suppressions(
+        self, get_issue_list
+    ):
+        """Run properties contain config_source and suppressions."""
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+        get_issue_list.return_value = []
+
+        suppressed = SuppressedIssue(
+            test_id="B104",
+            test_name="hardcoded_bind_all_interfaces",
+            filename="binding.py",
+            lineno=4,
+            issue_text="Possible binding to all interfaces.",
+            severity="MEDIUM",
+            confidence="MEDIUM",
+            nosec_type="specific",
+            suppressed_tests=["B104"],
+            nosec_lineno=4,
+        )
+        self.manager.suppressed_issues.append(suppressed)
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            sarif.report(
+                self.manager,
+                tmp_file,
+                self.issue.severity,
+                self.issue.confidence,
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            run_props = data["runs"][0]["properties"]
+
+            # config_source
+            self.assertIn("config_source", run_props)
+            self.assertEqual(
+                "default", run_props["config_source"]["config_format"]
+            )
+
+            # suppressions
+            self.assertIn("suppressions", run_props)
+            self.assertEqual(1, len(run_props["suppressions"]))
+            s = run_props["suppressions"][0]
+            self.assertEqual("B104", s["test_id"])
+            self.assertEqual("specific", s["nosec_type"])
+            self.assertEqual(["B104"], s["suppressed_tests"])

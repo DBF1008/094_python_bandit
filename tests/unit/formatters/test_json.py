@@ -14,6 +14,7 @@ from bandit.core import constants
 from bandit.core import issue
 from bandit.core import manager
 from bandit.core import metrics
+from bandit.core.suppression import SuppressedIssue
 from bandit.formatters import json as b_json
 
 
@@ -113,3 +114,132 @@ class JsonFormatterTests(testtools.TestCase):
             self.assertIn("candidates", data["results"][0])
             self.assertIn("more_info", data["results"][0])
             self.assertIsNotNone(data["results"][0]["more_info"])
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_rich_metadata(self, get_issue_list):
+        """Results include rule_doc_url and config_source."""
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+        get_issue_list.return_value = [self.issue]
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            b_json.report(
+                self.manager,
+                tmp_file,
+                self.issue.severity,
+                self.issue.confidence,
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            result = data["results"][0]
+
+            # rule_doc_url
+            self.assertIn("rule_doc_url", result)
+            self.assertIsInstance(result["rule_doc_url"], str)
+            self.assertTrue(result["rule_doc_url"].startswith("https://"))
+
+            # config_source
+            self.assertIn("config_source", result)
+            self.assertIn("config_file", result["config_source"])
+            self.assertIn("config_format", result["config_source"])
+            self.assertEqual("default", result["config_source"]["config_format"])
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_top_level_config_source(self, get_issue_list):
+        """Top-level output includes config_source."""
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+        get_issue_list.return_value = []
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            b_json.report(
+                self.manager,
+                tmp_file,
+                self.issue.severity,
+                self.issue.confidence,
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            self.assertIn("config_source", data)
+            self.assertEqual("default", data["config_source"]["config_format"])
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_suppressions_empty(self, get_issue_list):
+        """suppressions array is present and empty when nothing suppressed."""
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+        get_issue_list.return_value = [self.issue]
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            b_json.report(
+                self.manager,
+                tmp_file,
+                self.issue.severity,
+                self.issue.confidence,
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            self.assertIn("suppressions", data)
+            self.assertEqual([], data["suppressions"])
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_suppressions_populated(self, get_issue_list):
+        """Suppressed issues appear in the suppressions array."""
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+        get_issue_list.return_value = []
+
+        suppressed = SuppressedIssue(
+            test_id="B104",
+            test_name="hardcoded_bind_all_interfaces",
+            filename="binding.py",
+            lineno=4,
+            issue_text="Possible binding to all interfaces.",
+            severity="MEDIUM",
+            confidence="MEDIUM",
+            nosec_type="blanket",
+            suppressed_tests=[],
+            nosec_lineno=4,
+        )
+        self.manager.suppressed_issues.append(suppressed)
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            b_json.report(
+                self.manager,
+                tmp_file,
+                self.issue.severity,
+                self.issue.confidence,
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            self.assertEqual(1, len(data["suppressions"]))
+            s = data["suppressions"][0]
+            self.assertEqual("B104", s["test_id"])
+            self.assertEqual("blanket", s["nosec_type"])
+            self.assertEqual("binding.py", s["filename"])
+            self.assertEqual(4, s["lineno"])
+

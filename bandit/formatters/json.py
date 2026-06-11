@@ -83,6 +83,7 @@ import sys
 
 from bandit.core import docs_utils
 from bandit.core import test_properties
+from bandit.formatters import metadata as b_metadata
 
 LOG = logging.getLogger(__name__)
 
@@ -113,6 +114,7 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
         for r in results:
             d = r.as_dict(max_lines=lines)
             d["more_info"] = docs_utils.get_url(d["test_id"])
+            d.update(b_metadata.build_issue_metadata(r, manager))
             if len(results[r]) > 1:
                 d["candidates"] = [
                     c.as_dict(max_lines=lines) for c in results[r]
@@ -120,9 +122,12 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
             collector.append(d)
 
     else:
-        collector = [r.as_dict(max_lines=lines) for r in results]
-        for elem in collector:
-            elem["more_info"] = docs_utils.get_url(elem["test_id"])
+        collector = []
+        for r in results:
+            d = r.as_dict(max_lines=lines)
+            d["more_info"] = docs_utils.get_url(d["test_id"])
+            d.update(b_metadata.build_issue_metadata(r, manager))
+            collector.append(d)
 
     itemgetter = operator.itemgetter
     if manager.agg_type == "vuln":
@@ -135,6 +140,12 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
         )
 
     machine_output["metrics"] = manager.metrics.data
+
+    # enriched top-level metadata
+    machine_output["config_source"] = b_metadata.build_config_metadata(manager)
+    machine_output["suppressions"] = b_metadata.build_suppressions_list(
+        manager
+    )
 
     # timezone agnostic format
     TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"

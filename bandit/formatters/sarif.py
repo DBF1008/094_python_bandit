@@ -136,6 +136,7 @@ from jschema_to_python.to_json import to_json
 
 import bandit
 from bandit.core import docs_utils
+from bandit.formatters import metadata as b_metadata
 
 LOG = logging.getLogger(__name__)
 SCHEMA_URI = "https://json.schemastore.org/sarif-2.1.0.json"
@@ -174,7 +175,13 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
                         execution_successful=True,
                     )
                 ],
-                properties={"metrics": manager.metrics.data},
+                properties={
+                    "metrics": manager.metrics.data,
+                    "config_source": b_metadata.build_config_metadata(manager),
+                    "suppressions": b_metadata.build_suppressions_list(
+                        manager
+                    ),
+                },
             )
         ],
     )
@@ -187,7 +194,7 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
 
     issues = manager.get_issue_list(sev_level=sev_level, conf_level=conf_level)
 
-    add_results(issues, run)
+    add_results(issues, run, manager)
 
     serializedLog = to_json(log)
 
@@ -225,21 +232,21 @@ def add_skipped_file_notifications(skips, invocation):
         invocation.tool_configuration_notifications.append(notification)
 
 
-def add_results(issues, run):
+def add_results(issues, run, manager):
     if run.results is None:
         run.results = []
 
     rules = {}
     rule_indices = {}
     for issue in issues:
-        result = create_result(issue, rules, rule_indices)
+        result = create_result(issue, rules, rule_indices, manager)
         run.results.append(result)
 
     if len(rules) > 0:
         run.tool.driver.rules = list(rules.values())
 
 
-def create_result(issue, rules, rule_indices):
+def create_result(issue, rules, rule_indices, manager):
     issue_dict = issue.as_dict()
 
     rule, rule_index = create_or_find_rule(issue_dict, rules, rule_indices)
@@ -258,6 +265,8 @@ def create_result(issue, rules, rule_indices):
         issue_dict["code"],
     )
 
+    enriched = b_metadata.build_issue_metadata(issue, manager)
+
     return om.Result(
         rule_id=rule.id,
         rule_index=rule_index,
@@ -267,6 +276,8 @@ def create_result(issue, rules, rule_indices):
         properties={
             "issue_confidence": issue_dict["issue_confidence"],
             "issue_severity": issue_dict["issue_severity"],
+            "rule_doc_url": enriched["rule_doc_url"],
+            "config_source": enriched["config_source"],
         },
     )
 

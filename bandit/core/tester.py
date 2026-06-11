@@ -8,6 +8,7 @@ import warnings
 
 from bandit.core import constants
 from bandit.core import context as b_context
+from bandit.core import suppression as b_suppression
 from bandit.core import utils
 
 warnings.formatwarning = utils.warnings_formatter
@@ -17,6 +18,7 @@ LOG = logging.getLogger(__name__)
 class BanditTester:
     def __init__(self, testset, debug, nosec_lines, metrics):
         self.results = []
+        self.suppressed_issues = []
         self.testset = testset
         self.last_result = None
         self.debug = debug
@@ -78,6 +80,21 @@ class BanditTester:
 
                     # don't skip the test if there was no nosec comment
                     if nosec_tests_to_skip is not None:
+                        # Determine which line carried the nosec comment.
+                        nosec_lineno = (
+                            result.lineno
+                            if result.lineno in self.nosec_lines
+                            else next(
+                                (
+                                    ln
+                                    for ln in temp_context.get(
+                                        "linerange", []
+                                    )
+                                    if ln in self.nosec_lines
+                                ),
+                                result.lineno,
+                            )
+                        )
                         # If the set is empty then it means that nosec was
                         # used without test number -> update nosecs counter.
                         # If the test id is in the set of tests to skip,
@@ -85,12 +102,42 @@ class BanditTester:
                         if not nosec_tests_to_skip:
                             LOG.debug("skipped, nosec without test number")
                             self.metrics.note_nosec()
+                            self.suppressed_issues.append(
+                                b_suppression.SuppressedIssue(
+                                    test_id=result.test_id,
+                                    test_name=name,
+                                    filename=result.fname,
+                                    lineno=result.lineno,
+                                    issue_text=result.text,
+                                    severity=result.severity,
+                                    confidence=result.confidence,
+                                    nosec_type="blanket",
+                                    suppressed_tests=[],
+                                    nosec_lineno=nosec_lineno,
+                                )
+                            )
                             continue
                         if result.test_id in nosec_tests_to_skip:
                             LOG.debug(
                                 f"skipped, nosec for test {result.test_id}"
                             )
                             self.metrics.note_skipped_test()
+                            self.suppressed_issues.append(
+                                b_suppression.SuppressedIssue(
+                                    test_id=result.test_id,
+                                    test_name=name,
+                                    filename=result.fname,
+                                    lineno=result.lineno,
+                                    issue_text=result.text,
+                                    severity=result.severity,
+                                    confidence=result.confidence,
+                                    nosec_type="specific",
+                                    suppressed_tests=sorted(
+                                        nosec_tests_to_skip
+                                    ),
+                                    nosec_lineno=nosec_lineno,
+                                )
+                            )
                             continue
 
                     self.results.append(result)

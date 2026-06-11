@@ -71,6 +71,7 @@ class BanditManager:
         self.metrics = metrics.Metrics()
         self.b_ts = b_test_set.BanditTestSet(config, profile)
         self.scores = []
+        self.suppressed_issues = []
 
     def get_skipped(self):
         ret = []
@@ -86,6 +87,14 @@ class BanditManager:
         self, sev_level=b_constants.LOW, conf_level=b_constants.LOW
     ):
         return self.filter_results(sev_level, conf_level)
+
+    def get_suppressed_issues(self):
+        """Return the list of issues suppressed by ``#nosec`` comments.
+
+        :return: list of
+            :class:`~bandit.core.suppression.SuppressedIssue` instances
+        """
+        return self.suppressed_issues
 
     def populate_baseline(self, data):
         """Populate a baseline set of issues from a JSON report
@@ -364,6 +373,7 @@ class BanditManager:
 
         score = res.process(data)
         self.results.extend(res.tester.results)
+        self.suppressed_issues.extend(res.tester.suppressed_issues)
         return score
 
 
