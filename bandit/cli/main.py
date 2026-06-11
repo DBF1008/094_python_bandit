@@ -110,15 +110,41 @@ def _running_under_virtualenv():
 
 def _get_profile(config, profile_name, config_path):
     profile = {}
+    sources = {}
     if profile_name:
         profiles = config.get_option("profiles") or {}
         profile = profiles.get(profile_name)
         if profile is None:
             raise utils.ProfileNotFound(config_path, profile_name)
         LOG.debug("read in legacy profile '%s': %s", profile_name, profile)
+        for tid in profile.get("include", []):
+            sources.setdefault(tid, []).append((
+                f"profile:{profile_name}",
+                "included",
+                f"included by profile '{profile_name}'",
+            ))
+        for tid in profile.get("exclude", []):
+            sources.setdefault(tid, []).append((
+                f"profile:{profile_name}",
+                "excluded",
+                f"excluded by profile '{profile_name}'",
+            ))
     else:
         profile["include"] = set(config.get_option("tests") or [])
         profile["exclude"] = set(config.get_option("skips") or [])
+        for tid in profile["include"]:
+            sources.setdefault(tid, []).append((
+                "config_file",
+                "included",
+                "included via config file tests list",
+            ))
+        for tid in profile["exclude"]:
+            sources.setdefault(tid, []).append((
+                "config_file",
+                "excluded",
+                "excluded via config file skips list",
+            ))
+    profile["sources"] = sources
     return profile
 
 
@@ -371,6 +397,14 @@ def main():
         default=False,
         help="exit with 0, " "even with results found",
     )
+    parser.add_argument(
+        "--explain-rules",
+        dest="explain_rules",
+        action="store_true",
+        default=False,
+        help="include rule provenance information in output, "
+        "showing why each test is enabled or disabled",
+    )
     python_ver = sys.version.replace("\n", "")
     parser.add_argument(
         "--version",
@@ -621,6 +655,23 @@ def main():
 
         profile["include"].update(args.tests.split(",") if args.tests else [])
         profile["exclude"].update(args.skips.split(",") if args.skips else [])
+
+        sources = profile.setdefault("sources", {})
+        if args.tests:
+            for tid in args.tests.split(","):
+                sources.setdefault(tid, []).append((
+                    "cli:--tests",
+                    "included",
+                    "included via CLI --tests",
+                ))
+        if args.skips:
+            for tid in args.skips.split(","):
+                sources.setdefault(tid, []).append((
+                    "cli:--skip",
+                    "excluded",
+                    "excluded via CLI --skip",
+                ))
+
         extension_mgr.validate_profile(profile)
 
     except (utils.ProfileNotFound, ValueError) as e:
@@ -635,6 +686,7 @@ def main():
         verbose=args.verbose,
         quiet=args.quiet,
         ignore_nosec=args.ignore_nosec,
+        explain_rules=args.explain_rules,
     )
 
     if args.baseline is not None:

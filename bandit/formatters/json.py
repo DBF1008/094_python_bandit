@@ -136,6 +136,12 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
 
     machine_output["metrics"] = manager.metrics.data
 
+    if manager.rule_explanations:
+        machine_output["rule_explanations"] = sorted(
+            [e.as_dict() for e in manager.rule_explanations.values()],
+            key=itemgetter("test_id"),
+        )
+
     # timezone agnostic format
     TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 

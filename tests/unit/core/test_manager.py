@@ -393,3 +393,38 @@ class ManagerTests(testtools.TestCase):
                 [issue_a, issue_b], [issue_a, issue_b, issue_c]
             ),
         )
+
+    def test_rule_explanations_disabled_by_default(self):
+        # Without explain_rules, rule_explanations should be empty
+        self.assertEqual({}, self.manager.rule_explanations)
+
+    def test_rule_explanations_enabled(self):
+        m = manager.BanditManager(
+            config=self.config,
+            agg_type="file",
+            debug=False,
+            verbose=False,
+            explain_rules=True,
+        )
+        # Should have explanations for registered plugins
+        self.assertIsInstance(m.rule_explanations, dict)
+        self.assertTrue(len(m.rule_explanations) > 0)
+
+    def test_rule_explanations_with_profile(self):
+        profile = {
+            "include": set(),
+            "exclude": set(),
+            "sources": {},
+        }
+        m = manager.BanditManager(
+            config=self.config,
+            agg_type="file",
+            debug=False,
+            verbose=False,
+            profile=profile,
+            explain_rules=True,
+        )
+        self.assertIsInstance(m.rule_explanations, dict)
+        # All tests should be enabled (no include filter, no exclude)
+        for exp in m.rule_explanations.values():
+            self.assertTrue(exp.enabled)

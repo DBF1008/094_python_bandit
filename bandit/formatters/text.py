@@ -75,6 +75,24 @@ def get_metrics(manager):
     return "\n".join([bit for bit in bits])
 
 
+def get_rule_explanations(manager):
+    explanations = manager.rule_explanations
+    if not explanations:
+        return ""
+    bits = []
+    bits.append("\nRule explanations:")
+    for exp in sorted(explanations.values(), key=lambda e: e.test_id):
+        status = "enabled" if exp.enabled else "disabled"
+        sources_str = "; ".join(
+            f"{s['source']}: {s['detail']}" for s in exp.sources
+        )
+        bits.append(
+            f"\t{exp.test_id}  {exp.test_name:<30s} {status}"
+            f"  ({sources_str})"
+        )
+    return "\n".join([bit for bit in bits])
+
+
 def _output_issue_str(
     issue, indent, show_lineno=True, show_code=True, lines=-1
 ):
@@ -188,6 +206,9 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
 
         skipped = manager.get_skipped()
         bits.append(get_metrics(manager))
+        rule_exp = get_rule_explanations(manager)
+        if rule_exp:
+            bits.append(rule_exp)
         bits.append(f"Files skipped ({len(skipped)}):")
         bits.extend(["\t%s (%s)" % skip for skip in skipped])
         result = "\n".join([bit for bit in bits]) + "\n"

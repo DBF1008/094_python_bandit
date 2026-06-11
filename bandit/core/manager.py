@@ -41,6 +41,7 @@ class BanditManager:
         quiet=False,
         profile=None,
         ignore_nosec=False,
+        explain_rules=False,
     ):
         """Get logger, config, AST handler, and result store ready
 
@@ -52,6 +53,7 @@ class BanditManager:
         :param quiet: Whether to only show output in the case of an error
         :param profile_name: Optional name of profile to use (from cmd line)
         :param ignore_nosec: Whether to ignore #nosec or not
+        :param explain_rules: Whether to generate rule provenance explanations
         :return:
         """
         self.debug = debug
@@ -69,8 +71,15 @@ class BanditManager:
         self.baseline = []
         self.agg_type = agg_type
         self.metrics = metrics.Metrics()
-        self.b_ts = b_test_set.BanditTestSet(config, profile)
+        self.b_ts = b_test_set.BanditTestSet(
+            config, profile, explain=explain_rules
+        )
         self.scores = []
+
+    @property
+    def rule_explanations(self):
+        """Return rule provenance explanations, empty dict if not enabled."""
+        return self.b_ts.explanations
 
     def get_skipped(self):
         ret = []

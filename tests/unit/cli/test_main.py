@@ -326,3 +326,70 @@ class BanditCLIMainTests(testtools.TestCase):
             mock_mgr_results_ct.return_value = 1
 
             self.assertRaisesRegex(SystemExit, "0", bandit.main)
+
+
+class BanditCLIProfileSourceTests(testtools.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.current_directory = os.getcwd()
+
+    def tearDown(self):
+        super().tearDown()
+        os.chdir(self.current_directory)
+
+    def test_get_profile_config_file_sources(self):
+        """Test that _get_profile annotates sources from config file."""
+        config = mock.MagicMock()
+        config.get_option.side_effect = lambda key: {
+            "tests": ["B101", "B201"],
+            "skips": ["B301"],
+        }.get(key)
+
+        profile = bandit._get_profile(config, None, None)
+
+        self.assertIn("sources", profile)
+        self.assertIn("B101", profile["sources"])
+        self.assertIn("B201", profile["sources"])
+        self.assertIn("B301", profile["sources"])
+        # B101 should be marked as included from config_file
+        self.assertEqual("config_file", profile["sources"]["B101"][0][0])
+        self.assertEqual("included", profile["sources"]["B101"][0][1])
+        # B301 should be marked as excluded from config_file
+        self.assertEqual("config_file", profile["sources"]["B301"][0][0])
+        self.assertEqual("excluded", profile["sources"]["B301"][0][1])
+
+    def test_get_profile_named_profile_sources(self):
+        """Test that _get_profile annotates sources from named profile."""
+        config = mock.MagicMock()
+        config.get_option.return_value = {
+            "strict": {
+                "include": ["B201"],
+                "exclude": ["B101"],
+            }
+        }
+
+        profile = bandit._get_profile(config, "strict", "bandit.yaml")
+
+        self.assertIn("sources", profile)
+        self.assertIn("B201", profile["sources"])
+        self.assertEqual(
+            "profile:strict", profile["sources"]["B201"][0][0]
+        )
+        self.assertEqual("included", profile["sources"]["B201"][0][1])
+        self.assertIn("B101", profile["sources"])
+        self.assertEqual(
+            "profile:strict", profile["sources"]["B101"][0][0]
+        )
+        self.assertEqual("excluded", profile["sources"]["B101"][0][1])
+
+    def test_get_profile_empty_config(self):
+        """Test that _get_profile works with empty config."""
+        config = mock.MagicMock()
+        config.get_option.return_value = None
+
+        profile = bandit._get_profile(config, None, None)
+
+        self.assertIn("sources", profile)
+        self.assertEqual({}, profile["sources"])
+        self.assertEqual(set(), profile["include"])
+        self.assertEqual(set(), profile["exclude"])
