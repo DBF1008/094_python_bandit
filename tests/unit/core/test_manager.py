@@ -386,10 +386,83 @@ class ManagerTests(testtools.TestCase):
             manager._find_candidate_matches([issue_a], [issue_c]),
         )
 
-        # a and b match, a and b should both return a and b candidates
-        self.assertEqual(
-            {issue_a: [issue_a, issue_b], issue_b: [issue_a, issue_b]},
-            manager._find_candidate_matches(
-                [issue_a, issue_b], [issue_a, issue_b, issue_c]
-            ),
+        # a and b are equal so they collapse into one dict key (hash fix)
+        result = manager._find_candidate_matches(
+            [issue_a, issue_b], [issue_a, issue_b, issue_c]
         )
+        self.assertEqual(1, len(result))
+        key = list(result.keys())[0]
+        self.assertEqual(key, issue_a)
+        self.assertEqual([issue_a, issue_b], result[key])
+
+    def test_compare_baseline_counting(self):
+        """Counting match: baseline has 2, results has 3 => 1 unmatched."""
+        issue_a = self._get_issue_instance()
+        issue_b = self._get_issue_instance()
+        issue_c = self._get_issue_instance()
+
+        # All three are __eq__-equal (same fields except lineno)
+        issue_a.lineno = 1
+        issue_b.lineno = 2
+        issue_c.lineno = 3
+
+        baseline = [issue_a, issue_b]
+        results = [issue_a, issue_b, issue_c]
+
+        unmatched = manager._compare_baseline_results(baseline, results)
+        self.assertEqual(1, len(unmatched))
+
+    def test_compare_baseline_lineno_drift(self):
+        """Pure line-number drift must not produce unmatched issues."""
+        issue_a = self._get_issue_instance()
+        issue_a.lineno = 10
+
+        issue_b = self._get_issue_instance()
+        issue_b.lineno = 20
+
+        baseline = [issue_a]
+        results = [issue_b]
+
+        unmatched = manager._compare_baseline_results(baseline, results)
+        self.assertEqual([], unmatched)
+
+    def test_compare_baseline_same_count_no_backflow(self):
+        """Same type and count should produce zero unmatched."""
+        issue_a = self._get_issue_instance()
+        issue_b = self._get_issue_instance()
+
+        baseline = [issue_a, issue_b]
+        results = [issue_a, issue_b]
+
+        unmatched = manager._compare_baseline_results(baseline, results)
+        self.assertEqual([], unmatched)
+
+    def test_find_candidate_no_backflow(self):
+        """Candidates should come from unmatched only, not full results."""
+        new_issue = self._get_issue_instance(sev=constants.HIGH)
+        new_issue.fname = "new.py"
+
+        old_issue = self._get_issue_instance()
+        old_issue.fname = "old.py"
+
+        # Simulate: only new_issue is unmatched
+        unmatched = [new_issue]
+        result = manager._find_candidate_matches(unmatched, unmatched)
+
+        # old_issue should NOT appear in candidates
+        self.assertEqual(1, len(result))
+        self.assertEqual([new_issue], result[new_issue])
+
+    def test_find_candidate_dedup(self):
+        """Equal unmatched issues collapse to one dict key after hash fix."""
+        issue_a = self._get_issue_instance()
+        issue_b = self._get_issue_instance()
+        # a and b are __eq__-equal (same fname, test, text, etc.)
+
+        result = manager._find_candidate_matches(
+            [issue_a, issue_b], [issue_a, issue_b]
+        )
+        # Should have exactly one key since a == b and hash(a) == hash(b)
+        self.assertEqual(1, len(result))
+        candidates = list(result.values())[0]
+        self.assertEqual(2, len(candidates))

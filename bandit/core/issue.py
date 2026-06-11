@@ -73,7 +73,7 @@ class Cwe:
         return self.id != other.id
 
     def __hash__(self):
-        return id(self)
+        return hash(self.id)
 
 
 class Issue:
@@ -142,7 +142,17 @@ class Issue:
         return not self.__eq__(other)
 
     def __hash__(self):
-        return id(self)
+        return hash(
+            (
+                self.text,
+                self.severity,
+                self.cwe.id,
+                self.confidence,
+                self.fname,
+                self.test,
+                self.test_id,
+            )
+        )
 
     def filter(self, severity, confidence):
         """Utility to filter on confidence and severity

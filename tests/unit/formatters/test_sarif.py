@@ -137,3 +137,84 @@ class SarifFormatterTests(testtools.TestCase):
                 self.tmp_fname,
                 physicalLocation["artifactLocation"]["uri"],
             )
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_baseline(self, get_issue_list):
+        """Baseline mode with multiple candidates emits relatedLocations."""
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+
+        candidate_a = issue.Issue(
+            severity=bandit.MEDIUM,
+            cwe=issue.Cwe.MULTIPLE_BINDS,
+            confidence=bandit.MEDIUM,
+            text="Possible binding to all interfaces.",
+            test_id="B104",
+            lineno=4,
+        )
+        candidate_a.fname = self.context["filename"]
+        candidate_a.linerange = [4]
+        candidate_a.test = self.check_name
+
+        candidate_b = issue.Issue(
+            severity=bandit.MEDIUM,
+            cwe=issue.Cwe.MULTIPLE_BINDS,
+            confidence=bandit.MEDIUM,
+            text="Possible binding to all interfaces.",
+            test_id="B104",
+            lineno=10,
+        )
+        candidate_b.fname = self.context["filename"]
+        candidate_b.linerange = [10]
+        candidate_b.test = self.check_name
+
+        get_issue_list.return_value = collections.OrderedDict(
+            [(self.issue, [candidate_a, candidate_b])]
+        )
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            sarif.report(
+                self.manager,
+                tmp_file,
+                self.issue.severity,
+                self.issue.confidence,
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            result = data["runs"][0]["results"][0]
+            self.assertIn("relatedLocations", result)
+            self.assertEqual(2, len(result["relatedLocations"]))
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_baseline_single_candidate(self, get_issue_list):
+        """Baseline mode with single candidate has no relatedLocations."""
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+
+        get_issue_list.return_value = collections.OrderedDict(
+            [(self.issue, [self.issue])]
+        )
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            sarif.report(
+                self.manager,
+                tmp_file,
+                self.issue.severity,
+                self.issue.confidence,
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            result = data["runs"][0]["results"][0]
+            self.assertIsNone(result.get("relatedLocations"))

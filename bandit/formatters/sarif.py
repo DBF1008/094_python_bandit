@@ -136,6 +136,7 @@ from jschema_to_python.to_json import to_json
 
 import bandit
 from bandit.core import docs_utils
+from bandit.core import test_properties
 
 LOG = logging.getLogger(__name__)
 SCHEMA_URI = "https://json.schemastore.org/sarif-2.1.0.json"
@@ -143,6 +144,7 @@ SCHEMA_VER = "2.1.0"
 TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
+@test_properties.accepts_baseline
 def report(manager, fileobj, sev_level, conf_level, lines=-1):
     """Prints issues in SARIF format
 
@@ -229,11 +231,43 @@ def add_results(issues, run):
     if run.results is None:
         run.results = []
 
+    baseline = not isinstance(issues, list)
+
     rules = {}
     rule_indices = {}
-    for issue in issues:
-        result = create_result(issue, rules, rule_indices)
-        run.results.append(result)
+
+    if baseline:
+        for issue in issues:
+            result = create_result(issue, rules, rule_indices)
+            candidates = issues[issue]
+            if len(candidates) > 1:
+                related = []
+                for candidate in candidates:
+                    c_dict = candidate.as_dict()
+                    line_range = c_dict["line_range"] or [
+                        c_dict["line_number"]
+                    ]
+                    phys_loc = om.PhysicalLocation(
+                        artifact_location=om.ArtifactLocation(
+                            uri=to_uri(c_dict["filename"])
+                        )
+                    )
+                    add_region_and_context_region(
+                        phys_loc,
+                        line_range,
+                        c_dict["col_offset"],
+                        c_dict["end_col_offset"],
+                        c_dict["code"],
+                    )
+                    related.append(
+                        om.Location(physical_location=phys_loc)
+                    )
+                result.related_locations = related
+            run.results.append(result)
+    else:
+        for issue in issues:
+            result = create_result(issue, rules, rule_indices)
+            run.results.append(result)
 
     if len(rules) > 0:
         run.tool.driver.rules = list(rules.values())

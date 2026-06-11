@@ -105,11 +105,15 @@ class BanditManager:
     def filter_results(self, sev_filter, conf_filter):
         """Returns a list of results filtered by the baseline
 
-        This works by checking the number of results returned from each file we
-        process. If the number of results is different to the number reported
-        for the same file in the baseline, then we return all results for the
-        file. We can't reliably return just the new results, as line numbers
-        will likely have changed.
+        This works by comparing each current result against the baseline using
+        a consumptive counting match: each baseline issue can only cancel out
+        one current result.  Issues whose type/text/file match the baseline
+        but whose count exceeds it are reported as new, while pure line-number
+        drift (same issues, same count) produces no output.
+
+        When new issues are found, candidate matches are drawn only from the
+        unmatched set so that already-matched old issues never backflow into
+        the output.
 
         :param sev_filter: severity level filter to apply
         :param conf_filter: confidence level filter to apply
@@ -124,8 +128,8 @@ class BanditManager:
 
         unmatched = _compare_baseline_results(self.baseline, results)
         # if it's a baseline we'll return a dictionary of issues and a list of
-        # candidate issues
-        return _find_candidate_matches(unmatched, results)
+        # candidate issues drawn only from the unmatched set
+        return _find_candidate_matches(unmatched, unmatched)
 
     def results_count(
         self, sev_filter=b_constants.LOW, conf_filter=b_constants.LOW
@@ -429,13 +433,28 @@ def _compare_baseline_results(baseline, results):
     """Compare a baseline list of issues to list of results
 
     This function compares a baseline set of issues to a current set of issues
-    to find results that weren't present in the baseline.
+    to find results that weren't present in the baseline.  It uses a
+    consumptive counting match: each baseline issue can cancel out at most one
+    current result, so genuinely new issues of the same type are detected
+    rather than silently swallowed by a simple existence check.
 
     :param baseline: Baseline list of issues
     :param results: Current list of issues
     :return: List of unmatched issues
     """
-    return [a for a in results if a not in baseline]
+    baseline_remaining = list(baseline)
+    unmatched = []
+    for result in results:
+        found_idx = None
+        for i, b in enumerate(baseline_remaining):
+            if result == b:
+                found_idx = i
+                break
+        if found_idx is not None:
+            baseline_remaining.pop(found_idx)
+        else:
+            unmatched.append(result)
+    return unmatched
 
 
 def _find_candidate_matches(unmatched_issues, results_list):

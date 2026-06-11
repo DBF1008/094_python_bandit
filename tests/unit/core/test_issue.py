@@ -129,6 +129,43 @@ class IssueTests(testtools.TestCase):
         except UnicodeDecodeError:
             self.fail("Bytes not properly decoded in issue.get_code()")
 
+    def test_issue_hash_consistent_with_eq(self):
+        # Equal issues must have equal hashes
+        issue_a = _get_issue_instance()
+        issue_b = _get_issue_instance()
+        self.assertEqual(issue_a, issue_b)
+        self.assertEqual(hash(issue_a), hash(issue_b))
+
+        # Issues differing only in lineno are still equal and hash-equal
+        issue_c = _get_issue_instance()
+        issue_c.lineno = 999
+        self.assertEqual(issue_a, issue_c)
+        self.assertEqual(hash(issue_a), hash(issue_c))
+
+        # Issues with different severity are not equal
+        issue_d = _get_issue_instance(severity=bandit.HIGH)
+        self.assertNotEqual(issue_a, issue_d)
+
+        # Issues with different fname are not equal
+        issue_e = _get_issue_instance()
+        issue_e.fname = "other.py"
+        self.assertNotEqual(issue_a, issue_e)
+
+        # Equal issues can be used as dict keys without duplication
+        d = {issue_a: "first"}
+        d[issue_b] = "second"
+        self.assertEqual(1, len(d))
+        self.assertEqual("second", d[issue_a])
+
+    def test_cwe_hash_consistent_with_eq(self):
+        cwe_a = issue.Cwe(issue.Cwe.MULTIPLE_BINDS)
+        cwe_b = issue.Cwe(issue.Cwe.MULTIPLE_BINDS)
+        self.assertEqual(cwe_a, cwe_b)
+        self.assertEqual(hash(cwe_a), hash(cwe_b))
+
+        cwe_c = issue.Cwe(issue.Cwe.SQL_INJECTION)
+        self.assertNotEqual(cwe_a, cwe_c)
+
 
 def _get_issue_instance(
     severity=bandit.MEDIUM,

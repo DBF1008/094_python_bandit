@@ -201,6 +201,7 @@ class ScreenFormatterTests(testtools.TestCase):
 
         issue_a = _get_issue_instance()
         issue_b = _get_issue_instance()
+        issue_b.fname = "other.py"  # differ so they are distinct dict keys
 
         issue_x = _get_issue_instance()
         issue_x.fname = "x"
