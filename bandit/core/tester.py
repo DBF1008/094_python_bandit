@@ -9,6 +9,8 @@ import warnings
 from bandit.core import constants
 from bandit.core import context as b_context
 from bandit.core import utils
+from bandit.core.issue import NosecComment
+from bandit.core.issue import Suppression
 
 warnings.formatwarning = utils.warnings_formatter
 LOG = logging.getLogger(__name__)
@@ -17,6 +19,7 @@ LOG = logging.getLogger(__name__)
 class BanditTester:
     def __init__(self, testset, debug, nosec_lines, metrics):
         self.results = []
+        self.suppressed = []
         self.testset = testset
         self.last_result = None
         self.debug = debug
@@ -53,7 +56,7 @@ class BanditTester:
                     result = test(context)
 
                 if result is not None:
-                    nosec_tests_to_skip = self._get_nosecs_from_contexts(
+                    nosec_comment = self._get_nosecs_from_contexts(
                         temp_context, test_result=result
                     )
 
@@ -77,18 +80,20 @@ class BanditTester:
                         result.test_id = test._test_id
 
                     # don't skip the test if there was no nosec comment
-                    if nosec_tests_to_skip is not None:
-                        # If the set is empty then it means that nosec was
-                        # used without test number -> update nosecs counter.
-                        # If the test id is in the set of tests to skip,
-                        # log and increment the skip by test count.
-                        if not nosec_tests_to_skip:
+                    if nosec_comment is not None:
+                        if nosec_comment.is_blanket:
                             LOG.debug("skipped, nosec without test number")
+                            self.suppressed.append(
+                                Suppression(result, nosec_comment)
+                            )
                             self.metrics.note_nosec()
                             continue
-                        if result.test_id in nosec_tests_to_skip:
+                        if result.test_id in nosec_comment.test_ids:
                             LOG.debug(
                                 f"skipped, nosec for test {result.test_id}"
+                            )
+                            self.suppressed.append(
+                                Suppression(result, nosec_comment)
                             )
                             self.metrics.note_skipped_test()
                             continue
@@ -103,12 +108,13 @@ class BanditTester:
                     val = constants.RANKING_VALUES[result.confidence]
                     scores["CONFIDENCE"][con] += val
                 else:
-                    nosec_tests_to_skip = self._get_nosecs_from_contexts(
+                    nosec_comment = self._get_nosecs_from_contexts(
                         temp_context
                     )
                     if (
-                        nosec_tests_to_skip
-                        and test._test_id in nosec_tests_to_skip
+                        nosec_comment is not None
+                        and not nosec_comment.is_blanket
+                        and test._test_id in nosec_comment.test_ids
                     ):
                         LOG.warning(
                             f"nosec encountered ({test._test_id}), but no "
@@ -125,33 +131,28 @@ class BanditTester:
         return scores
 
     def _get_nosecs_from_contexts(self, context, test_result=None):
-        """Use context and optional test result to get set of tests to skip.
+        """Use context and optional test result to get NosecComment.
         :param context: temp context
         :param test_result: optional test result
-        :return: set of tests to skip for the line based on contexts
+        :return: NosecComment or None if no nosec comment applies
         """
-        nosec_tests_to_skip = set()
-        base_tests = (
+        base_nosec = (
             self.nosec_lines.get(test_result.lineno, None)
             if test_result
             else None
         )
-        context_tests = utils.get_nosec(self.nosec_lines, context)
+        context_nosec = utils.get_nosec(self.nosec_lines, context)
 
-        # if both are none there were no comments
-        # this is explicitly different from being empty.
-        # empty set indicates blanket nosec comment without
-        # individual test names or ids
-        if base_tests is None and context_tests is None:
-            nosec_tests_to_skip = None
+        if base_nosec is None and context_nosec is None:
+            return None
 
-        # combine tests from current line and context line
-        if base_tests is not None:
-            nosec_tests_to_skip.update(base_tests)
-        if context_tests is not None:
-            nosec_tests_to_skip.update(context_tests)
+        merged = NosecComment()
+        if base_nosec is not None:
+            merged.merge(base_nosec)
+        if context_nosec is not None:
+            merged.merge(context_nosec)
 
-        return nosec_tests_to_skip
+        return merged
 
     @staticmethod
     def report_error(test, context, error):

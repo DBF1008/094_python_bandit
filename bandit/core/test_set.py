@@ -15,6 +15,8 @@ class BanditTestSet:
     def __init__(self, config, profile=None):
         if not profile:
             profile = {}
+        self._include = set(profile.get("include", []))
+        self._exclude = set(profile.get("exclude", []))
         extman = extension_loader.MANAGER
         filtering = self._get_filter(config, profile)
         self.plugins = [
@@ -22,6 +24,12 @@ class BanditTestSet:
         ]
         self.plugins.extend(self._load_builtins(filtering, profile))
         self._load_tests(config, self.plugins)
+
+    def get_include_ids(self):
+        return self._include
+
+    def get_exclude_ids(self):
+        return self._exclude
 
     @staticmethod
     def _get_filter(config, profile):

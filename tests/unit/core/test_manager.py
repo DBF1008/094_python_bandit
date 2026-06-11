@@ -11,6 +11,7 @@ import testtools
 from bandit.core import config
 from bandit.core import constants
 from bandit.core import issue
+from bandit.core.issue import NosecComment
 from bandit.core import manager
 
 
@@ -393,3 +394,49 @@ class ManagerTests(testtools.TestCase):
                 [issue_a, issue_b], [issue_a, issue_b, issue_c]
             ),
         )
+
+    def test_parse_nosec_comment_no_comment(self):
+        result = manager._parse_nosec_comment("# just a comment")
+        self.assertIsNone(result)
+
+    def test_parse_nosec_comment_blanket(self):
+        result = manager._parse_nosec_comment("# nosec")
+        self.assertIsInstance(result, NosecComment)
+        self.assertTrue(result.is_blanket)
+        self.assertEqual(result.reason, "")
+
+    @mock.patch("bandit.core.extension_loader.MANAGER")
+    def test_parse_nosec_comment_with_reason(self, ext_mgr):
+        ext_mgr.check_id.return_value = True
+        result = manager._parse_nosec_comment(
+            "# nosec B101 -- accepted risk for testing"
+        )
+        self.assertIsInstance(result, NosecComment)
+        self.assertIn("B101", result.test_ids)
+        self.assertEqual(result.reason, "accepted risk for testing")
+
+    def test_parse_nosec_comment_blanket_with_reason(self):
+        result = manager._parse_nosec_comment(
+            "# nosec -- we trust this input"
+        )
+        self.assertIsInstance(result, NosecComment)
+        self.assertTrue(result.is_blanket)
+        self.assertEqual(result.reason, "we trust this input")
+
+    def test_get_config_context(self):
+        ctx = self.manager.get_config_context()
+        self.assertIn("config_file", ctx)
+        self.assertIn("profile", ctx)
+        self.assertIn("include", ctx["profile"])
+        self.assertIn("exclude", ctx["profile"])
+        self.assertIn("ignore_nosec", ctx)
+        self.assertFalse(ctx["ignore_nosec"])
+
+    def test_get_suppressed_issues(self):
+        self.assertEqual([], self.manager.get_suppressed_issues())
+        test_issue = self._get_issue_instance()
+        nc = NosecComment(test_ids={"B101"})
+        self.manager.suppressed_issues.append(
+            issue.Suppression(test_issue, nc)
+        )
+        self.assertEqual(1, len(self.manager.get_suppressed_issues()))

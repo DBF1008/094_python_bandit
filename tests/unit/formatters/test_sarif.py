@@ -137,3 +137,64 @@ class SarifFormatterTests(testtools.TestCase):
                 self.tmp_fname,
                 physicalLocation["artifactLocation"]["uri"],
             )
+            # config context
+            self.assertIn("configContext", run["properties"])
+            config_ctx = run["properties"]["configContext"]
+            self.assertIn("config_file", config_ctx)
+            self.assertIn("profile", config_ctx)
+            self.assertIn("ignore_nosec", config_ctx)
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_with_suppressions(self, get_issue_list):
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+
+        get_issue_list.return_value = []
+
+        suppressed_issue = issue.Issue(
+            severity=bandit.LOW,
+            cwe=issue.Cwe.MULTIPLE_BINDS,
+            confidence=bandit.MEDIUM,
+            text="Suppressed finding.",
+            test_id="B104",
+        )
+        suppressed_issue.fname = self.context["filename"]
+        suppressed_issue.lineno = 4
+        suppressed_issue.linerange = [4]
+        suppressed_issue.code = self.context["code"]
+        suppressed_issue.test = self.check_name
+
+        nosec = issue.NosecComment(
+            test_ids={"B104"}, reason="accepted risk"
+        )
+        self.manager.suppressed_issues.append(
+            issue.Suppression(suppressed_issue, nosec)
+        )
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            sarif.report(
+                self.manager,
+                tmp_file,
+                bandit.LOW,
+                bandit.LOW,
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            run = data["runs"][0]
+            # should have one suppressed result
+            self.assertEqual(1, len(run["results"]))
+            result = run["results"][0]
+            self.assertEqual("B104", result["ruleId"])
+            self.assertIn("suppressions", result)
+            self.assertEqual(1, len(result["suppressions"]))
+            supp = result["suppressions"][0]
+            self.assertEqual("inSource", supp["kind"])
+            self.assertEqual("accepted risk", supp["justification"])
+            self.assertIn("nosec_kind", supp["properties"])
+            self.assertEqual("targeted", supp["properties"]["nosec_kind"])

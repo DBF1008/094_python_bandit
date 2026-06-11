@@ -130,6 +130,69 @@ class IssueTests(testtools.TestCase):
             self.fail("Bytes not properly decoded in issue.get_code()")
 
 
+class NosecCommentTests(testtools.TestCase):
+    def test_blanket_nosec(self):
+        nc = issue.NosecComment()
+        self.assertTrue(nc.is_blanket)
+        self.assertEqual(nc.reason, "")
+        d = nc.as_dict()
+        self.assertEqual(d["kind"], "blanket")
+        self.assertEqual(d["test_ids"], [])
+        self.assertEqual(d["reason"], "")
+
+    def test_targeted_nosec(self):
+        nc = issue.NosecComment(test_ids={"B101", "B102"}, reason="safe here")
+        self.assertFalse(nc.is_blanket)
+        self.assertEqual(nc.reason, "safe here")
+        d = nc.as_dict()
+        self.assertEqual(d["kind"], "targeted")
+        self.assertEqual(d["test_ids"], ["B101", "B102"])
+        self.assertEqual(d["reason"], "safe here")
+
+    def test_merge(self):
+        nc1 = issue.NosecComment(test_ids={"B101"}, reason="reason1")
+        nc2 = issue.NosecComment(test_ids={"B102"}, reason="reason2")
+        nc1.merge(nc2)
+        self.assertEqual(nc1.test_ids, {"B101", "B102"})
+        # first reason is kept
+        self.assertEqual(nc1.reason, "reason1")
+
+    def test_merge_fills_empty_reason(self):
+        nc1 = issue.NosecComment(test_ids={"B101"})
+        nc2 = issue.NosecComment(test_ids={"B102"}, reason="from context")
+        nc1.merge(nc2)
+        self.assertEqual(nc1.reason, "from context")
+
+    def test_merge_none(self):
+        nc = issue.NosecComment(test_ids={"B101"})
+        nc.merge(None)
+        self.assertEqual(nc.test_ids, {"B101"})
+
+
+class SuppressionTests(testtools.TestCase):
+    def test_as_dict(self):
+        test_issue = _get_issue_instance()
+        nc = issue.NosecComment(
+            test_ids={"B999"}, reason="intentional"
+        )
+        s = issue.Suppression(test_issue, nc)
+        d = s.as_dict(max_lines=0)
+        self.assertEqual(d["filename"], "code.py")
+        self.assertEqual(d["test_id"], "B999")
+        self.assertIn("nosec", d)
+        self.assertEqual(d["nosec"]["kind"], "targeted")
+        self.assertEqual(d["nosec"]["test_ids"], ["B999"])
+        self.assertEqual(d["nosec"]["reason"], "intentional")
+
+    def test_blanket_suppression(self):
+        test_issue = _get_issue_instance()
+        nc = issue.NosecComment()
+        s = issue.Suppression(test_issue, nc)
+        d = s.as_dict()
+        self.assertEqual(d["nosec"]["kind"], "blanket")
+        self.assertEqual(d["nosec"]["test_ids"], [])
+
+
 def _get_issue_instance(
     severity=bandit.MEDIUM,
     cwe=issue.Cwe.MULTIPLE_BINDS,

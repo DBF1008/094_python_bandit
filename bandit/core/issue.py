@@ -76,6 +76,46 @@ class Cwe:
         return id(self)
 
 
+class NosecComment:
+    """Represents a parsed #nosec comment with optional test IDs and reason."""
+
+    def __init__(self, test_ids=None, reason=""):
+        self.test_ids = test_ids if test_ids is not None else set()
+        self.reason = reason
+
+    @property
+    def is_blanket(self):
+        return len(self.test_ids) == 0
+
+    def as_dict(self):
+        return {
+            "test_ids": sorted(self.test_ids),
+            "reason": self.reason,
+            "kind": "blanket" if self.is_blanket else "targeted",
+        }
+
+    def merge(self, other):
+        """Merge another NosecComment into this one."""
+        if other is None:
+            return
+        self.test_ids.update(other.test_ids)
+        if other.reason and not self.reason:
+            self.reason = other.reason
+
+
+class Suppression:
+    """Represents an issue that was suppressed by a #nosec comment."""
+
+    def __init__(self, issue, nosec_comment):
+        self.issue = issue
+        self.nosec_comment = nosec_comment
+
+    def as_dict(self, max_lines=3):
+        d = self.issue.as_dict(max_lines=max_lines)
+        d["nosec"] = self.nosec_comment.as_dict()
+        return d
+
+
 class Issue:
     def __init__(
         self,

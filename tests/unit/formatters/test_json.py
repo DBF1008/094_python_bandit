@@ -113,3 +113,58 @@ class JsonFormatterTests(testtools.TestCase):
             self.assertIn("candidates", data["results"][0])
             self.assertIn("more_info", data["results"][0])
             self.assertIsNotNone(data["results"][0]["more_info"])
+            self.assertIn("config_context", data)
+            self.assertIn("suppressions", data)
+            self.assertIsInstance(data["suppressions"], list)
+            config_ctx = data["config_context"]
+            self.assertIn("config_file", config_ctx)
+            self.assertIn("profile", config_ctx)
+            self.assertIn("ignore_nosec", config_ctx)
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_with_suppressions(self, get_issue_list):
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+
+        get_issue_list.return_value = []
+
+        suppressed_issue = issue.Issue(
+            bandit.LOW,
+            issue.Cwe.MULTIPLE_BINDS,
+            bandit.MEDIUM,
+            "Suppressed issue.",
+        )
+        suppressed_issue.fname = self.context["filename"]
+        suppressed_issue.lineno = 10
+        suppressed_issue.linerange = [10]
+        suppressed_issue.test = "test_plugin"
+        suppressed_issue.test_id = "B999"
+
+        nosec = issue.NosecComment(
+            test_ids={"B999"}, reason="accepted risk"
+        )
+        self.manager.suppressed_issues.append(
+            issue.Suppression(suppressed_issue, nosec)
+        )
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            b_json.report(
+                self.manager,
+                tmp_file,
+                bandit.LOW,
+                bandit.LOW,
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            self.assertEqual(len(data["suppressions"]), 1)
+            s = data["suppressions"][0]
+            self.assertEqual(s["test_id"], "B999")
+            self.assertEqual(s["nosec"]["kind"], "targeted")
+            self.assertEqual(s["nosec"]["test_ids"], ["B999"])
+            self.assertEqual(s["nosec"]["reason"], "accepted risk")

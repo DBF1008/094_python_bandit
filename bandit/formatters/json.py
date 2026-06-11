@@ -81,8 +81,8 @@ import logging
 import operator
 import sys
 
-from bandit.core import docs_utils
 from bandit.core import test_properties
+from bandit.formatters import utils as fmt_utils
 
 LOG = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
         collector = []
         for r in results:
             d = r.as_dict(max_lines=lines)
-            d["more_info"] = docs_utils.get_url(d["test_id"])
+            fmt_utils.enrich_issue(d)
             if len(results[r]) > 1:
                 d["candidates"] = [
                     c.as_dict(max_lines=lines) for c in results[r]
@@ -122,7 +122,7 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
     else:
         collector = [r.as_dict(max_lines=lines) for r in results]
         for elem in collector:
-            elem["more_info"] = docs_utils.get_url(elem["test_id"])
+            fmt_utils.enrich_issue(elem)
 
     itemgetter = operator.itemgetter
     if manager.agg_type == "vuln":
@@ -135,6 +135,12 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
         )
 
     machine_output["metrics"] = manager.metrics.data
+
+    machine_output["config_context"] = manager.get_config_context()
+
+    machine_output["suppressions"] = [
+        s.as_dict(max_lines=lines) for s in manager.get_suppressed_issues()
+    ]
 
     # timezone agnostic format
     TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"

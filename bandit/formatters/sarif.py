@@ -174,7 +174,10 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
                         execution_successful=True,
                     )
                 ],
-                properties={"metrics": manager.metrics.data},
+                properties={
+                    "metrics": manager.metrics.data,
+                    "configContext": manager.get_config_context(),
+                },
             )
         ],
     )
@@ -187,7 +190,10 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
 
     issues = manager.get_issue_list(sev_level=sev_level, conf_level=conf_level)
 
-    add_results(issues, run)
+    rules, rule_indices = add_results(issues, run)
+
+    suppressed = manager.get_suppressed_issues()
+    add_suppressed_results(suppressed, run, rules, rule_indices)
 
     serializedLog = to_json(log)
 
@@ -235,6 +241,42 @@ def add_results(issues, run):
         result = create_result(issue, rules, rule_indices)
         run.results.append(result)
 
+    if len(rules) > 0:
+        run.tool.driver.rules = list(rules.values())
+
+    return rules, rule_indices
+
+
+def add_suppressed_results(suppressed_issues, run, rules=None,
+                           rule_indices=None):
+    if not suppressed_issues:
+        return
+
+    if run.results is None:
+        run.results = []
+    if rules is None:
+        rules = {}
+    if rule_indices is None:
+        rule_indices = {}
+
+    for suppression_obj in suppressed_issues:
+        result = create_result(
+            suppression_obj.issue, rules, rule_indices
+        )
+        nosec = suppression_obj.nosec_comment
+        result.suppressions = [
+            om.Suppression(
+                kind="inSource",
+                justification=nosec.reason if nosec.reason else None,
+                properties={
+                    "nosec_test_ids": sorted(nosec.test_ids),
+                    "nosec_kind": nosec.as_dict()["kind"],
+                },
+            )
+        ]
+        run.results.append(result)
+
+    # update rules list with any new rules from suppressed results
     if len(rules) > 0:
         run.tool.driver.rules = list(rules.values())
 
