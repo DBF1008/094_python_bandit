@@ -310,6 +310,91 @@ class BanditCLIMainTests(testtools.TestCase):
             # assert a SystemExit with code 0
             self.assertRaisesRegex(SystemExit, "0", bandit.main)
 
+    def test_log_info_after_cli_merge(self):
+        # Test that _log_info logs both original profile and merged values
+        profile = {"include": {"B101", "B102"}, "exclude": {"B201"}}
+        args = mock.MagicMock()
+        args.tests = "B103,B104"
+        args.skips = "B202"
+
+        profile_include = set(profile["include"])
+        profile_exclude = set(profile["exclude"])
+
+        profile["include"].update(args.tests.split(","))
+        profile["exclude"].update(args.skips.split(","))
+
+        with mock.patch("bandit.cli.main.LOG") as mock_log:
+            bandit._log_info(args, profile, profile_include, profile_exclude)
+
+            info_calls = mock_log.info.call_args_list
+
+            # "profile include tests" should show original config values
+            self.assertEqual(info_calls[0][0][0], "profile include tests: %s")
+            logged_profile_inc = set(
+                info_calls[0][0][1].split(",")
+            )
+            self.assertEqual(logged_profile_inc, {"B101", "B102"})
+
+            # "profile exclude tests" should show original config values
+            logged_profile_exc = set(
+                info_calls[1][0][1].split(",")
+            )
+            self.assertEqual(logged_profile_exc, {"B201"})
+
+            # "tests include" should show merged values
+            self.assertEqual(info_calls[4][0][0], "tests include: %s")
+            logged_merged_inc = set(
+                info_calls[4][0][1].split(",")
+            )
+            self.assertEqual(logged_merged_inc, {"B101", "B102", "B103", "B104"})
+
+            # "tests exclude" should show merged values
+            self.assertEqual(info_calls[5][0][0], "tests exclude: %s")
+            logged_merged_exc = set(
+                info_calls[5][0][1].split(",")
+            )
+            self.assertEqual(logged_merged_exc, {"B201", "B202"})
+
+    def test_log_info_no_cli_override(self):
+        # When no CLI tests/skips, profile and merged values should match
+        profile = {"include": {"B101"}, "exclude": {"B201"}}
+        args = mock.MagicMock()
+        args.tests = None
+        args.skips = None
+
+        profile_include = set(profile["include"])
+        profile_exclude = set(profile["exclude"])
+
+        with mock.patch("bandit.cli.main.LOG") as mock_log:
+            bandit._log_info(args, profile, profile_include, profile_exclude)
+
+            info_calls = mock_log.info.call_args_list
+
+            # profile and merged values should be the same
+            profile_inc = info_calls[0][0][1]
+            merged_inc = info_calls[4][0][1]
+            self.assertEqual(profile_inc, merged_inc)
+
+            profile_exc = info_calls[1][0][1]
+            merged_exc = info_calls[5][0][1]
+            self.assertEqual(profile_exc, merged_exc)
+
+    def test_log_info_empty_profile(self):
+        # When profile is empty, should log "None" for both
+        profile = {"include": set(), "exclude": set()}
+        args = mock.MagicMock()
+        args.tests = None
+        args.skips = None
+
+        with mock.patch("bandit.cli.main.LOG") as mock_log:
+            bandit._log_info(args, profile, set(), set())
+
+            info_calls = mock_log.info.call_args_list
+            self.assertEqual(info_calls[0][0][1], "None")
+            self.assertEqual(info_calls[1][0][1], "None")
+            self.assertEqual(info_calls[4][0][1], "None")
+            self.assertEqual(info_calls[5][0][1], "None")
+
     @mock.patch(
         "sys.argv",
         ["bandit", "-c", "bandit.yaml", "test", "-o", "output", "--exit-zero"],

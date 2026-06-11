@@ -122,13 +122,25 @@ def _get_profile(config, profile_name, config_path):
     return profile
 
 
-def _log_info(args, profile):
-    inc = ",".join([t for t in profile["include"]]) or "None"
-    exc = ",".join([t for t in profile["exclude"]]) or "None"
-    LOG.info("profile include tests: %s", inc)
-    LOG.info("profile exclude tests: %s", exc)
+def _log_info(args, profile, profile_include, profile_exclude):
+    LOG.info(
+        "profile include tests: %s",
+        ",".join(sorted(profile_include)) or "None",
+    )
+    LOG.info(
+        "profile exclude tests: %s",
+        ",".join(sorted(profile_exclude)) or "None",
+    )
     LOG.info("cli include tests: %s", args.tests)
     LOG.info("cli exclude tests: %s", args.skips)
+    LOG.info(
+        "tests include: %s",
+        ",".join(sorted(profile["include"])) or "None",
+    )
+    LOG.info(
+        "tests exclude: %s",
+        ",".join(sorted(profile["exclude"])) or "None",
+    )
 
 
 def main():
@@ -617,11 +629,14 @@ def main():
 
     try:
         profile = _get_profile(b_conf, args.profile, args.config_file)
-        _log_info(args, profile)
+
+        profile_include = set(profile.get("include", []))
+        profile_exclude = set(profile.get("exclude", []))
 
         profile["include"].update(args.tests.split(",") if args.tests else [])
         profile["exclude"].update(args.skips.split(",") if args.skips else [])
         extension_mgr.validate_profile(profile)
+        _log_info(args, profile, profile_include, profile_exclude)
 
     except (utils.ProfileNotFound, ValueError) as e:
         LOG.error(e)

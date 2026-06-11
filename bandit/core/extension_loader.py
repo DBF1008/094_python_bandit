@@ -93,7 +93,11 @@ class Manager:
             if not self.check_id(exc):
                 LOG.warning(f"Unknown test found in profile: {exc}")
 
-        union = set(profile["include"]) & set(profile["exclude"])
+        # B001 is a meta test ID that gets expanded in BanditTestSet._get_filter,
+        # so it is valid for it to appear in both include and exclude.
+        inc = set(profile["include"]) - {"B001"}
+        exc = set(profile["exclude"]) - {"B001"}
+        union = inc & exc
         if len(union) > 0:
             raise ValueError(
                 f"Non-exclusive include/exclude test sets: {union}"

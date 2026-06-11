@@ -167,3 +167,74 @@ class BanditTestSetTests(testtools.TestCase):
         self.assertNotIn("Import", blacklist._config)
         self.assertNotIn("ImportFrom", blacklist._config)
         self.assertEqual(1, len(blacklist._config["Call"]))
+
+    def test_validate_profile_b001_in_both_include_exclude(self):
+        """B001 in both include and exclude should not raise ValueError."""
+        profile = {"include": {"B001", "B000"}, "exclude": {"B001"}}
+        # Should not raise - B001 is a meta ID handled specially by _get_filter
+        extension_loader.MANAGER.validate_profile(profile)
+
+    def test_validate_profile_specific_test_conflict_still_raises(self):
+        """A real test ID in both include and exclude must still raise."""
+        profile = {"include": {"B000"}, "exclude": {"B000"}}
+        self.assertRaises(
+            ValueError, extension_loader.MANAGER.validate_profile, profile
+        )
+
+    def test_validate_profile_b001_only_in_both(self):
+        """B001 alone in both include and exclude should not raise."""
+        profile = {"include": {"B001"}, "exclude": {"B001"}}
+        extension_loader.MANAGER.validate_profile(profile)
+
+    def test_get_filter_b001_include_and_exclude(self):
+        """When B001 in both include and exclude, blacklists are excluded."""
+        profile = {"include": {"B000", "B001"}, "exclude": {"B001"}}
+        filtering = test_set.BanditTestSet._get_filter(self.config, profile)
+        # B000 (non-blacklist plugin) should be included
+        self.assertIn("B000", filtering)
+        # B001 should not appear in the final filter
+        self.assertNotIn("B001", filtering)
+        # Specific blacklist tests should be excluded
+        self.assertNotIn("B401", filtering)
+        self.assertNotIn("B302", filtering)
+
+    def test_get_filter_b001_include_with_specific_exclude(self):
+        """B001 in include with specific blacklist ID in exclude."""
+        profile = {"include": {"B000", "B001"}, "exclude": {"B401"}}
+        filtering = test_set.BanditTestSet._get_filter(self.config, profile)
+        self.assertIn("B000", filtering)
+        # B401 excluded, B302 should remain
+        self.assertNotIn("B401", filtering)
+        self.assertIn("B302", filtering)
+
+    def test_get_filter_include_exclude_disjoint(self):
+        """Normal disjoint include/exclude should work as expected."""
+        profile = {"include": {"B000", "B401"}, "exclude": {"B401"}}
+        filtering = test_set.BanditTestSet._get_filter(self.config, profile)
+        self.assertIn("B000", filtering)
+        self.assertNotIn("B401", filtering)
+
+    def test_profile_blacklist_compat_with_include_and_exclude(self):
+        """Legacy blacklist profile with both include and exclude works."""
+        data = [
+            utils.build_conf_dict(
+                "marshal",
+                "B302",
+                issue.Cwe.DESERIALIZATION_OF_UNTRUSTED_DATA,
+                ["marshal.load", "marshal.loads"],
+                (
+                    "Deserialization with the marshal module is possibly "
+                    "dangerous."
+                ),
+            )
+        ]
+        profile = {
+            "include": {"B001", "B000"},
+            "exclude": set(),
+            "blacklist": {"Call": data},
+        }
+        ts = test_set.BanditTestSet(self.config, profile)
+        # B000 plugin should be loaded
+        self.assertEqual(1, len(ts.get_tests("Str")))
+        # Blacklist should be loaded with legacy data
+        self.assertEqual(1, len(ts.get_tests("Call")))
