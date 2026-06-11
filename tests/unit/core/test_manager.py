@@ -2,12 +2,14 @@
 # Copyright 2015 Hewlett-Packard Development Company, L.P.
 #
 # SPDX-License-Identifier: Apache-2.0
+import json
 import os
 from unittest import mock
 
 import fixtures
 import testtools
 
+from bandit.core import checkpoint
 from bandit.core import config
 from bandit.core import constants
 from bandit.core import issue
@@ -392,4 +394,160 @@ class ManagerTests(testtools.TestCase):
             manager._find_candidate_matches(
                 [issue_a, issue_b], [issue_a, issue_b, issue_c]
             ),
+        )
+
+
+class IncrementalManagerTests(testtools.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.config = config.BanditConfig()
+        self.manager = manager.BanditManager(
+            config=self.config, agg_type="file", debug=False, verbose=False
+        )
+        self.tmp_dir = self.useFixture(fixtures.TempDir()).path
+
+    def _create_python_file(self, name, content="x = 1\n"):
+        fpath = os.path.join(self.tmp_dir, name)
+        with open(fpath, "w") as f:
+            f.write(content)
+        return fpath
+
+    def test_incremental_info_default_none(self):
+        self.assertIsNone(self.manager.incremental_info)
+
+    def test_run_tests_incremental_no_checkpoint(self):
+        py_file = self._create_python_file("simple.py", "x = 1\n")
+        ckpt_path = os.path.join(self.tmp_dir, "test.checkpoint")
+        config_hash = "testhash123"
+
+        self.manager.files_list = [py_file]
+        self.manager.run_tests_incremental(ckpt_path, config_hash)
+
+        self.assertIsNotNone(self.manager.incremental_info)
+        self.assertEqual(0, self.manager.incremental_info["reused_count"])
+        self.assertEqual(1, self.manager.incremental_info["rescanned_count"])
+        self.assertFalse(
+            self.manager.incremental_info["checkpoint_invalidated"]
+        )
+        # Checkpoint file should be created
+        self.assertTrue(os.path.isfile(ckpt_path))
+
+    def test_run_tests_incremental_reuse_unchanged(self):
+        py_file = self._create_python_file("reuse.py", "x = 1\n")
+        ckpt_path = os.path.join(self.tmp_dir, "test.checkpoint")
+        config_hash = "hash_unchanged"
+
+        # First run: full scan
+        self.manager.files_list = [py_file]
+        self.manager.run_tests_incremental(ckpt_path, config_hash)
+        first_results = list(self.manager.results)
+
+        # Second run: should reuse
+        mgr2 = manager.BanditManager(
+            config=self.config, agg_type="file", debug=False
+        )
+        mgr2.files_list = [py_file]
+        mgr2.run_tests_incremental(ckpt_path, config_hash)
+
+        self.assertEqual(1, mgr2.incremental_info["reused_count"])
+        self.assertEqual(0, mgr2.incremental_info["rescanned_count"])
+        self.assertIn(py_file, mgr2.incremental_info["reused_files"])
+
+    def test_run_tests_incremental_rescan_changed_file(self):
+        py_file = self._create_python_file("change.py", "x = 1\n")
+        ckpt_path = os.path.join(self.tmp_dir, "test.checkpoint")
+        config_hash = "hash_change"
+
+        # First run
+        self.manager.files_list = [py_file]
+        self.manager.run_tests_incremental(ckpt_path, config_hash)
+
+        # Modify file
+        with open(py_file, "w") as f:
+            f.write("y = 2\n")
+
+        # Second run: should rescan
+        mgr2 = manager.BanditManager(
+            config=self.config, agg_type="file", debug=False
+        )
+        mgr2.files_list = [py_file]
+        mgr2.run_tests_incremental(ckpt_path, config_hash)
+
+        self.assertEqual(0, mgr2.incremental_info["reused_count"])
+        self.assertEqual(1, mgr2.incremental_info["rescanned_count"])
+
+    def test_run_tests_incremental_config_change_invalidates(self):
+        py_file = self._create_python_file("cfg.py", "x = 1\n")
+        ckpt_path = os.path.join(self.tmp_dir, "test.checkpoint")
+
+        # First run with hash A
+        self.manager.files_list = [py_file]
+        self.manager.run_tests_incremental(ckpt_path, "hashA")
+
+        # Second run with hash B: checkpoint should be invalidated
+        mgr2 = manager.BanditManager(
+            config=self.config, agg_type="file", debug=False
+        )
+        mgr2.files_list = [py_file]
+        mgr2.run_tests_incremental(ckpt_path, "hashB")
+
+        self.assertTrue(mgr2.incremental_info["checkpoint_invalidated"])
+        self.assertEqual(0, mgr2.incremental_info["reused_count"])
+        self.assertEqual(1, mgr2.incremental_info["rescanned_count"])
+
+    def test_run_tests_incremental_rescan_failed_files(self):
+        # Create a file with syntax error for first run
+        bad_file = self._create_python_file("bad.py", "def (\n")
+        ckpt_path = os.path.join(self.tmp_dir, "test.checkpoint")
+        config_hash = "hash_failed"
+
+        self.manager.files_list = [bad_file]
+        self.manager.run_tests_incremental(ckpt_path, config_hash)
+
+        # Verify file was skipped
+        self.assertTrue(len(self.manager.skipped) > 0)
+
+        # Fix the file
+        with open(bad_file, "w") as f:
+            f.write("x = 1\n")
+
+        # Second run: previously failed file should be rescanned
+        mgr2 = manager.BanditManager(
+            config=self.config, agg_type="file", debug=False
+        )
+        mgr2.files_list = [bad_file]
+        mgr2.run_tests_incremental(ckpt_path, config_hash)
+
+        self.assertEqual(0, mgr2.incremental_info["reused_count"])
+        self.assertEqual(1, mgr2.incremental_info["rescanned_count"])
+        # File should now succeed
+        self.assertEqual(0, len(mgr2.skipped))
+
+    def test_save_checkpoint_creates_file(self):
+        py_file = self._create_python_file("save.py", "x = 1\n")
+        ckpt_path = os.path.join(self.tmp_dir, "ckpt.json")
+
+        self.manager.files_list = [py_file]
+        self.manager.run_tests_incremental(ckpt_path, "savehash")
+
+        self.assertTrue(os.path.isfile(ckpt_path))
+        with open(ckpt_path) as f:
+            data = json.load(f)
+        self.assertEqual(1, data["version"])
+        self.assertEqual("savehash", data["config_hash"])
+        self.assertIn(py_file, data["files"])
+        self.assertEqual("success", data["files"][py_file]["status"])
+
+    def test_checkpoint_records_skipped_files(self):
+        bad_file = self._create_python_file("syntax.py", "def (\n")
+        ckpt_path = os.path.join(self.tmp_dir, "ckpt.json")
+
+        self.manager.files_list = [bad_file]
+        self.manager.run_tests_incremental(ckpt_path, "skiphash")
+
+        with open(ckpt_path) as f:
+            data = json.load(f)
+        self.assertIn(bad_file, data["files"])
+        self.assertEqual(
+            "syntax_error", data["files"][bad_file]["status"]
         )

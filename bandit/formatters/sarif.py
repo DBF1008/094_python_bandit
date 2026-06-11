@@ -153,6 +153,24 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
     :param lines: Number of lines to report, -1 for all
     """
 
+    run_properties = {"metrics": manager.metrics.data}
+    if manager.incremental_info is not None:
+        run_properties["incremental"] = {
+            "enabled": True,
+            "reused_count": manager.incremental_info["reused_count"],
+            "rescanned_count": manager.incremental_info[
+                "rescanned_count"
+            ],
+            "total_count": manager.incremental_info["total_count"],
+            "checkpoint_invalidated": manager.incremental_info[
+                "checkpoint_invalidated"
+            ],
+            "reused_files": manager.incremental_info["reused_files"],
+            "rescanned_files": manager.incremental_info[
+                "rescanned_files"
+            ],
+        }
+
     log = om.SarifLog(
         schema_uri=SCHEMA_URI,
         version=SCHEMA_VER,
@@ -174,7 +192,7 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
                         execution_successful=True,
                     )
                 ],
-                properties={"metrics": manager.metrics.data},
+                properties=run_properties,
             )
         ],
     )

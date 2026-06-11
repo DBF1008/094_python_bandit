@@ -233,6 +233,76 @@ class ScreenFormatterTests(testtools.TestCase):
 
             output_str.assert_has_calls(calls, any_order=True)
 
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_with_incremental_info(self, get_issue_list):
+        conf = config.BanditConfig()
+        self.manager = manager.BanditManager(conf, "file")
+        (tmp_fd, self.tmp_fname) = tempfile.mkstemp()
+
+        self.manager.incremental_info = {
+            "enabled": True,
+            "reused_count": 8,
+            "rescanned_count": 3,
+            "total_count": 11,
+            "checkpoint_invalidated": False,
+            "reused_files": [],
+            "rescanned_files": [],
+        }
+        get_issue_list.return_value = []
+
+        with mock.patch("bandit.formatters.screen.do_print") as m:
+            with open(self.tmp_fname, "w") as tmp_file:
+                screen.report(
+                    self.manager, tmp_file, bandit.LOW, bandit.LOW, lines=5
+                )
+            data = "\n".join([str(a) for a in m.call_args[0][0]])
+            self.assertIn("Incremental mode", data)
+            self.assertIn("Reused 8 file(s)", data)
+            self.assertIn("rescanned 3 file(s)", data)
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_incremental_checkpoint_invalidated(self, get_issue_list):
+        conf = config.BanditConfig()
+        self.manager = manager.BanditManager(conf, "file")
+        (tmp_fd, self.tmp_fname) = tempfile.mkstemp()
+
+        self.manager.incremental_info = {
+            "enabled": True,
+            "reused_count": 0,
+            "rescanned_count": 5,
+            "total_count": 5,
+            "checkpoint_invalidated": True,
+            "reused_files": [],
+            "rescanned_files": [],
+        }
+        get_issue_list.return_value = []
+
+        with mock.patch("bandit.formatters.screen.do_print") as m:
+            with open(self.tmp_fname, "w") as tmp_file:
+                screen.report(
+                    self.manager, tmp_file, bandit.LOW, bandit.LOW, lines=5
+                )
+            data = "\n".join([str(a) for a in m.call_args[0][0]])
+            self.assertIn("invalidated", data)
+            self.assertIn("configuration change", data)
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_without_incremental_info(self, get_issue_list):
+        conf = config.BanditConfig()
+        self.manager = manager.BanditManager(conf, "file")
+        (tmp_fd, self.tmp_fname) = tempfile.mkstemp()
+
+        self.manager.incremental_info = None
+        get_issue_list.return_value = []
+
+        with mock.patch("bandit.formatters.screen.do_print") as m:
+            with open(self.tmp_fname, "w") as tmp_file:
+                screen.report(
+                    self.manager, tmp_file, bandit.LOW, bandit.LOW, lines=5
+                )
+            data = "\n".join([str(a) for a in m.call_args[0][0]])
+            self.assertNotIn("Incremental mode", data)
+
 
 def _get_issue_instance(
     severity=bandit.MEDIUM, cwe=123, confidence=bandit.MEDIUM

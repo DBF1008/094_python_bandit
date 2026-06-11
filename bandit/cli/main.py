@@ -358,6 +358,23 @@ def main():
         "(only JSON-formatted files are accepted)",
     )
     parser.add_argument(
+        "--incremental",
+        dest="incremental",
+        action="store_true",
+        default=False,
+        help="enable incremental scanning mode: skip unchanged files "
+        "using a checkpoint file to store previous scan results",
+    )
+    parser.add_argument(
+        "--checkpoint-file",
+        dest="checkpoint_file",
+        action="store",
+        default=".bandit.checkpoint",
+        type=str,
+        help="path to checkpoint file for incremental mode "
+        "(default: .bandit.checkpoint)",
+    )
+    parser.add_argument(
         "--ini",
         dest="ini_path",
         action="store",
@@ -672,7 +689,13 @@ def main():
         sys.exit(2)
 
     # initiate execution of tests within Bandit Manager
-    b_mgr.run_tests()
+    if args.incremental:
+        from bandit.core import checkpoint as b_checkpoint
+
+        config_hash = b_checkpoint.compute_config_hash(b_conf, profile)
+        b_mgr.run_tests_incremental(args.checkpoint_file, config_hash)
+    else:
+        b_mgr.run_tests()
     LOG.debug(b_mgr.b_ma)
     LOG.debug(b_mgr.metrics)
 

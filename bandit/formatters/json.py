@@ -144,6 +144,23 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
     )
     machine_output["generated_at"] = time_string
 
+    if manager.incremental_info is not None:
+        machine_output["incremental"] = {
+            "enabled": True,
+            "reused_count": manager.incremental_info["reused_count"],
+            "rescanned_count": manager.incremental_info[
+                "rescanned_count"
+            ],
+            "total_count": manager.incremental_info["total_count"],
+            "checkpoint_invalidated": manager.incremental_info[
+                "checkpoint_invalidated"
+            ],
+            "reused_files": manager.incremental_info["reused_files"],
+            "rescanned_files": manager.incremental_info[
+                "rescanned_files"
+            ],
+        }
+
     result = json.dumps(
         machine_output, sort_keys=True, indent=2, separators=(",", ": ")
     )

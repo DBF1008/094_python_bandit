@@ -71,6 +71,7 @@ class BanditManager:
         self.metrics = metrics.Metrics()
         self.b_ts = b_test_set.BanditTestSet(config, profile)
         self.scores = []
+        self.incremental_info = None
 
     def get_skipped(self):
         ret = []
@@ -365,6 +366,152 @@ class BanditManager:
         score = res.process(data)
         self.results.extend(res.tester.results)
         return score
+
+    def run_tests_incremental(self, checkpoint_path, config_hash):
+        """Run tests in incremental mode, reusing previous results.
+
+        Loads a checkpoint file, skips unchanged successful files, and
+        rescans new/modified/failed files. Saves a new checkpoint afterward.
+
+        :param checkpoint_path: path to the checkpoint file
+        :param config_hash: hash of current configuration
+        """
+        from bandit.core import checkpoint as b_checkpoint
+
+        self.incremental_info = {
+            "enabled": True,
+            "reused_count": 0,
+            "rescanned_count": 0,
+            "total_count": len(self.files_list),
+            "checkpoint_invalidated": False,
+            "reused_files": [],
+            "rescanned_files": [],
+        }
+
+        # 1. Load previous checkpoint
+        prev_checkpoint = b_checkpoint.Checkpoint.load(checkpoint_path)
+
+        # 2. Check config hash
+        if prev_checkpoint and prev_checkpoint.config_hash != config_hash:
+            LOG.warning(
+                "Configuration has changed since last checkpoint. "
+                "Full rescan will be performed."
+            )
+            prev_checkpoint = None
+            self.incremental_info["checkpoint_invalidated"] = True
+
+        # 3. Classify files: restorable vs needs-rescan
+        files_to_scan = []
+        restored_files = []
+        self._file_scores = {}
+
+        if prev_checkpoint:
+            for fname in self.files_list:
+                record = prev_checkpoint.files.get(fname)
+                if record and record.status == "success" and fname != "-":
+                    try:
+                        current_hash = b_checkpoint.compute_file_hash(fname)
+                    except OSError:
+                        files_to_scan.append(fname)
+                        continue
+
+                    if current_hash == record.content_hash:
+                        restored_files.append((fname, record))
+                    else:
+                        files_to_scan.append(fname)
+                else:
+                    files_to_scan.append(fname)
+        else:
+            files_to_scan = list(self.files_list)
+
+        # 4. Restore results from checkpoint for unchanged files
+        for fname, record in restored_files:
+            for issue_dict in record.issues:
+                issue_dict.setdefault("code", "")
+                restored_issue = issue.issue_from_dict(issue_dict)
+                self.results.append(restored_issue)
+
+            self.metrics.data[fname] = record.metrics
+            self.scores.append(record.score)
+            self._file_scores[fname] = record.score
+
+        self.incremental_info["reused_count"] = len(restored_files)
+        self.incremental_info["reused_files"] = [
+            fname for fname, _ in restored_files
+        ]
+
+        # 5. Scan files that need rescanning
+        scores_before = len(self.scores)
+        self.files_list = files_to_scan
+        self.run_tests()
+
+        # 6. Map scanned files to their scores
+        scanned_files_after = self.files_list
+        for i, fname in enumerate(scanned_files_after):
+            score_idx = scores_before + i
+            if score_idx < len(self.scores):
+                self._file_scores[fname] = self.scores[score_idx]
+
+        self.incremental_info["rescanned_count"] = len(files_to_scan)
+        self.incremental_info["rescanned_files"] = list(files_to_scan)
+
+        # 7. Merge file lists
+        restored_fnames = [fname for fname, _ in restored_files]
+        self.files_list = sorted(set(self.files_list + restored_fnames))
+
+        # 8. Re-aggregate metrics (run_tests already aggregated, but we
+        #    need to include restored files too)
+        self.metrics.aggregate()
+
+        # 9. Save new checkpoint
+        self._save_checkpoint(checkpoint_path, config_hash)
+
+    def _save_checkpoint(self, checkpoint_path, config_hash):
+        """Save current scan results as a checkpoint file."""
+        from bandit.core import checkpoint as b_checkpoint
+
+        ckpt = b_checkpoint.Checkpoint(config_hash=config_hash)
+
+        # Record successfully scanned files
+        for fname in self.files_list:
+            if fname == "<stdin>":
+                continue
+            try:
+                content_hash = b_checkpoint.compute_file_hash(fname)
+            except OSError:
+                continue
+
+            file_issues = [
+                iss.as_dict(with_code=False)
+                for iss in self.results
+                if iss.fname == fname
+            ]
+            file_metrics = self.metrics.data.get(fname, {})
+            file_score = self._file_scores.get(fname, {})
+
+            ckpt.files[fname] = b_checkpoint.FileRecord(
+                fname=fname,
+                status="success",
+                content_hash=content_hash,
+                issues=file_issues,
+                metrics=file_metrics,
+                score=file_score,
+            )
+
+        # Record skipped files
+        for fname, reason in self.skipped:
+            if "syntax error" in reason:
+                status = "syntax_error"
+            else:
+                status = "failed"
+            ckpt.files[fname] = b_checkpoint.FileRecord(
+                fname=fname, status=status
+            )
+
+        try:
+            ckpt.save(checkpoint_path)
+        except OSError as e:
+            LOG.warning("Failed to save checkpoint file: %s", e)
 
 
 def _get_files_from_dir(

@@ -113,3 +113,59 @@ class JsonFormatterTests(testtools.TestCase):
             self.assertIn("candidates", data["results"][0])
             self.assertIn("more_info", data["results"][0])
             self.assertIsNotNone(data["results"][0]["more_info"])
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_with_incremental_info(self, get_issue_list):
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+        self.manager.incremental_info = {
+            "enabled": True,
+            "reused_count": 5,
+            "rescanned_count": 2,
+            "total_count": 7,
+            "checkpoint_invalidated": False,
+            "reused_files": ["a.py", "b.py"],
+            "rescanned_files": ["c.py"],
+        }
+        get_issue_list.return_value = []
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            b_json.report(
+                self.manager, tmp_file, bandit.LOW, bandit.LOW
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            self.assertIn("incremental", data)
+            self.assertEqual(5, data["incremental"]["reused_count"])
+            self.assertEqual(2, data["incremental"]["rescanned_count"])
+            self.assertEqual(7, data["incremental"]["total_count"])
+            self.assertFalse(data["incremental"]["checkpoint_invalidated"])
+            self.assertIn("a.py", data["incremental"]["reused_files"])
+            self.assertIn("c.py", data["incremental"]["rescanned_files"])
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_without_incremental_info(self, get_issue_list):
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+        self.manager.incremental_info = None
+        get_issue_list.return_value = []
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            b_json.report(
+                self.manager, tmp_file, bandit.LOW, bandit.LOW
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            self.assertNotIn("incremental", data)

@@ -229,6 +229,19 @@ def report(manager, fileobj, sev_level, conf_level, lines=-1):
 
         bits.append(get_metrics(manager))
         skipped = manager.get_skipped()
+        if manager.incremental_info is not None:
+            inc = manager.incremental_info
+            bits.append(header("\nIncremental mode:"))
+            bits.append(
+                "\tReused %d file(s) from checkpoint, "
+                "rescanned %d file(s)"
+                % (inc["reused_count"], inc["rescanned_count"])
+            )
+            if inc["checkpoint_invalidated"]:
+                bits.append(
+                    "\tCheckpoint was invalidated due to "
+                    "configuration change"
+                )
         bits.append(header("Files skipped (%i):", len(skipped)))
         bits.extend(["\t%s (%s)" % skip for skip in skipped])
         do_print(bits)

@@ -137,3 +137,60 @@ class SarifFormatterTests(testtools.TestCase):
                 self.tmp_fname,
                 physicalLocation["artifactLocation"]["uri"],
             )
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_with_incremental_info(self, get_issue_list):
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+        self.manager.incremental_info = {
+            "enabled": True,
+            "reused_count": 4,
+            "rescanned_count": 1,
+            "total_count": 5,
+            "checkpoint_invalidated": False,
+            "reused_files": ["a.py"],
+            "rescanned_files": ["b.py"],
+        }
+        get_issue_list.return_value = []
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            sarif.report(
+                self.manager, tmp_file, bandit.LOW, bandit.LOW
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            run = data["runs"][0]
+            self.assertIn("incremental", run["properties"])
+            inc = run["properties"]["incremental"]
+            self.assertEqual(4, inc["reused_count"])
+            self.assertEqual(1, inc["rescanned_count"])
+            self.assertEqual(5, inc["total_count"])
+            self.assertFalse(inc["checkpoint_invalidated"])
+
+    @mock.patch("bandit.core.manager.BanditManager.get_issue_list")
+    def test_report_without_incremental_info(self, get_issue_list):
+        self.manager.files_list = ["binding.py"]
+        self.manager.scores = [
+            {
+                "SEVERITY": [0] * len(constants.RANKING),
+                "CONFIDENCE": [0] * len(constants.RANKING),
+            }
+        ]
+        self.manager.incremental_info = None
+        get_issue_list.return_value = []
+
+        with open(self.tmp_fname, "w") as tmp_file:
+            sarif.report(
+                self.manager, tmp_file, bandit.LOW, bandit.LOW
+            )
+
+        with open(self.tmp_fname) as f:
+            data = json.loads(f.read())
+            run = data["runs"][0]
+            self.assertNotIn("incremental", run["properties"])
