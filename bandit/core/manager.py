@@ -24,8 +24,8 @@ from bandit.core import node_visitor as b_node_visitor
 from bandit.core import test_set as b_test_set
 
 LOG = logging.getLogger(__name__)
-NOSEC_COMMENT = re.compile(r"#\s*nosec:?\s*(?P<tests>[^#]+)?#?")
-NOSEC_COMMENT_TESTS = re.compile(r"(?:(B\d+|[a-z\d_]+),?)+", re.IGNORECASE)
+NOSEC_COMMENT = re.compile(r"#\s*nosec:?\s*(?P<tests>[\w,\s]+)?")
+NOSEC_COMMENT_TESTS = re.compile(r"(B\d+|[a-z\d_]+)", re.IGNORECASE)
 PROGRESS_THRESHOLD = 50
 
 
@@ -315,7 +315,9 @@ class BanditManager:
                 if not self.ignore_nosec:
                     for toktype, tokval, (lineno, _), _, _ in tokens:
                         if toktype == tokenize.COMMENT:
-                            nosec_lines[lineno] = _parse_nosec_comment(tokval)
+                            nosec_result = _parse_nosec_comment(tokval)
+                            if nosec_result is not None:
+                                nosec_lines[lineno] = nosec_result
 
             except tokenize.TokenError:
                 pass
@@ -478,22 +480,34 @@ def _find_test_id_from_nosec_string(extman, match):
 def _parse_nosec_comment(comment):
     found_no_sec_comment = NOSEC_COMMENT.search(comment)
     if not found_no_sec_comment:
-        # there was no nosec comment
         return None
 
-    matches = found_no_sec_comment.groupdict()
-    nosec_tests = matches.get("tests", set())
+    nosec_tests = found_no_sec_comment.group("tests")
 
-    # empty set indicates that there was a nosec comment without specific
-    # test ids or names
+    # No test IDs/names specified (or only whitespace) = blanket nosec
+    if not nosec_tests or not nosec_tests.strip():
+        return set()
+
+    extman = extension_loader.MANAGER
     test_ids = set()
-    if nosec_tests:
-        extman = extension_loader.MANAGER
-        # lookup tests by short code or name
-        for test in NOSEC_COMMENT_TESTS.finditer(nosec_tests):
-            test_match = test.group(1)
-            test_id = _find_test_id_from_nosec_string(extman, test_match)
-            if test_id:
-                test_ids.add(test_id)
+    has_explicit_test_id = False
+    for test in NOSEC_COMMENT_TESTS.finditer(nosec_tests):
+        test_match = test.group(1)
+        test_id = _find_test_id_from_nosec_string(extman, test_match)
+        if test_id:
+            test_ids.add(test_id)
+            has_explicit_test_id = True
+        elif re.match(r"^B\d+$", test_match, re.IGNORECASE):
+            # Looks like a test ID but is unrecognized — don't blanket-skip
+            has_explicit_test_id = True
+
+    # User wrote test IDs (B-prefixed) but none resolved — don't blanket-skip
+    if has_explicit_test_id and not test_ids:
+        return None
+
+    # No recognized IDs and no B-prefixed tokens — treat as blanket nosec
+    # (handles cases like "# nosec TODO" where TODO is a plain comment)
+    if not has_explicit_test_id:
+        return set()
 
     return test_ids

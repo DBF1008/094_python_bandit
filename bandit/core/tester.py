@@ -130,7 +130,6 @@ class BanditTester:
         :param test_result: optional test result
         :return: set of tests to skip for the line based on contexts
         """
-        nosec_tests_to_skip = set()
         base_tests = (
             self.nosec_lines.get(test_result.lineno, None)
             if test_result
@@ -138,14 +137,17 @@ class BanditTester:
         )
         context_tests = utils.get_nosec(self.nosec_lines, context)
 
-        # if both are none there were no comments
-        # this is explicitly different from being empty.
-        # empty set indicates blanket nosec comment without
-        # individual test names or ids
+        # Both None means no nosec comment at all
         if base_tests is None and context_tests is None:
-            nosec_tests_to_skip = None
+            return None
 
-        # combine tests from current line and context line
+        # If either source is blanket nosec (empty set), blanket wins
+        if (base_tests is not None and len(base_tests) == 0) or \
+           (context_tests is not None and len(context_tests) == 0):
+            return set()
+
+        # Both have specific test IDs — union them
+        nosec_tests_to_skip = set()
         if base_tests is not None:
             nosec_tests_to_skip.update(base_tests)
         if context_tests is not None:

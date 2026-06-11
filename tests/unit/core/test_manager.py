@@ -393,3 +393,162 @@ class ManagerTests(testtools.TestCase):
                 [issue_a, issue_b], [issue_a, issue_b, issue_c]
             ),
         )
+
+
+class ParseNosecCommentTests(testtools.TestCase):
+    """Tests for _parse_nosec_comment and related nosec parsing."""
+
+    def setUp(self):
+        super().setUp()
+        self.mock_extman = mock.MagicMock()
+        self.known_ids = {
+            "B101", "B102", "B301", "B303", "B404",
+            "B601", "B602", "B607",
+        }
+        self.mock_extman.check_id.side_effect = (
+            lambda x: x in self.known_ids
+        )
+        self.name_to_id = {
+            "subprocess_popen_with_shell_equals_true": "B602",
+            "start_process_with_partial_path": "B607",
+            "import_subprocess": "B404",
+            "md5": "B303",
+        }
+        self.mock_extman.get_test_id.side_effect = (
+            lambda x: self.name_to_id.get(x)
+        )
+        self.patch_extman = mock.patch(
+            "bandit.core.manager.extension_loader.MANAGER",
+            self.mock_extman,
+        )
+        self.patch_extman.start()
+
+    def tearDown(self):
+        self.patch_extman.stop()
+        super().tearDown()
+
+    def test_not_a_nosec_comment(self):
+        self.assertIsNone(manager._parse_nosec_comment("# regular comment"))
+
+    def test_blanket_nosec(self):
+        self.assertEqual(set(), manager._parse_nosec_comment("# nosec"))
+
+    def test_blanket_nosec_no_space(self):
+        self.assertEqual(set(), manager._parse_nosec_comment("#nosec"))
+
+    def test_blanket_nosec_with_trailing_space(self):
+        self.assertEqual(set(), manager._parse_nosec_comment("# nosec  "))
+
+    def test_nosec_with_colon_blanket(self):
+        self.assertEqual(set(), manager._parse_nosec_comment("# nosec:"))
+
+    def test_single_id(self):
+        self.assertEqual(
+            {"B601"}, manager._parse_nosec_comment("# nosec B601")
+        )
+
+    def test_comma_separated_ids_no_space(self):
+        self.assertEqual(
+            {"B601", "B602"},
+            manager._parse_nosec_comment("# nosec B601,B602"),
+        )
+
+    def test_comma_separated_ids_with_space(self):
+        self.assertEqual(
+            {"B601", "B602"},
+            manager._parse_nosec_comment("# nosec B601, B602"),
+        )
+
+    def test_three_comma_separated_ids(self):
+        self.assertEqual(
+            {"B601", "B602", "B607"},
+            manager._parse_nosec_comment("# nosec B601,B602,B607"),
+        )
+
+    def test_space_separated_ids(self):
+        self.assertEqual(
+            {"B601", "B602"},
+            manager._parse_nosec_comment("# nosec B601 B602"),
+        )
+
+    def test_plugin_name(self):
+        self.assertEqual(
+            {"B602"},
+            manager._parse_nosec_comment(
+                "# nosec subprocess_popen_with_shell_equals_true"
+            ),
+        )
+
+    def test_mixed_id_and_name_comma_no_space(self):
+        self.assertEqual(
+            {"B601", "B602"},
+            manager._parse_nosec_comment(
+                "# nosec B601,subprocess_popen_with_shell_equals_true"
+            ),
+        )
+
+    def test_trailing_comment_with_dash(self):
+        self.assertEqual(
+            {"B601"},
+            manager._parse_nosec_comment("# nosec B601 - safe to use"),
+        )
+
+    def test_trailing_comment_with_paren(self):
+        self.assertEqual(
+            {"B601"},
+            manager._parse_nosec_comment("# nosec B601 (reason)"),
+        )
+
+    def test_invalid_id_no_blanket_fallback(self):
+        self.assertIsNone(
+            manager._parse_nosec_comment("# nosec B999")
+        )
+
+    def test_valid_and_invalid_id_keeps_valid(self):
+        self.assertEqual(
+            {"B601"},
+            manager._parse_nosec_comment("# nosec B601, B999"),
+        )
+
+    def test_nosec_after_type_comment(self):
+        self.assertEqual(
+            set(),
+            manager._parse_nosec_comment(
+                "# type: ... # nosec # noqa: E501"
+            ),
+        )
+
+    def test_nosec_with_id_before_noqa(self):
+        self.assertEqual(
+            {"B607"},
+            manager._parse_nosec_comment("# nosec B607 # noqa"),
+        )
+
+    def test_nosec_with_colon_and_name(self):
+        self.assertEqual(
+            {"B404"},
+            manager._parse_nosec_comment("# nosec: import_subprocess"),
+        )
+
+    def test_multiple_names_space_separated(self):
+        self.assertEqual(
+            {"B602", "B607"},
+            manager._parse_nosec_comment(
+                "# nosec subprocess_popen_with_shell_equals_true "
+                "start_process_with_partial_path"
+            ),
+        )
+
+    def test_nosec_with_plain_comment_word(self):
+        # "# nosec TODO" should be blanket nosec (TODO is a comment, not a test ID)
+        self.assertEqual(
+            set(),
+            manager._parse_nosec_comment("# nosec TODO"),
+        )
+
+    def test_nosec_with_valid_id_and_plain_word(self):
+        # Valid ID + plain comment word keeps only the valid ID
+        self.assertEqual(
+            {"B601"},
+            manager._parse_nosec_comment("# nosec B601 TODO"),
+        )
